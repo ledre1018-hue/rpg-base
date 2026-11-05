@@ -1,11 +1,18 @@
 package com.rpg.core;
 
+import com.rpg.persistencia.LogCombate;
+
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+
 /** Imprime cada evento del combate y lo guarda para incluirlo en el guardado de la partida. */
 public class RegistroCombate {
 
+    private static final DateTimeFormatter FORMATO_FECHA = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+
     private final StringBuilder texto = new StringBuilder();
 
-    public void agregar(String linea) {
+    public synchronized void agregar(String linea) {
         System.out.println(linea);
         texto.append(linea).append(System.lineSeparator());
     }
@@ -14,13 +21,16 @@ public class RegistroCombate {
         agregar(String.format(formato, argumentos));
     }
 
-    public void limpiar() {
+    public synchronized void limpiar() {
         texto.setLength(0);
     }
 
-    // TALLER ARCHIVOS: aqui iria volcar el registro de combate a un archivo .txt (BufferedWriter + FileWriter,
-    // con append si quieres conservar combates anteriores) y leerlo de vuelta con BufferedReader.
-    public String getTexto() {
+    public boolean volcarEnArchivo(LogCombate log) {
+        String encabezado = "##### Combate del " + LocalDateTime.now().format(FORMATO_FECHA) + " #####";
+        return log.escribir(encabezado + System.lineSeparator() + getTexto(), true);
+    }
+
+    public synchronized String getTexto() {
         return texto.toString();
     }
 }
