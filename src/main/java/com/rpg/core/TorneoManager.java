@@ -10,6 +10,8 @@ import java.util.List;
 /** Torneo de 4 gladiadores: dos semifinales y una final. */
 public class TorneoManager {
 
+    private static final long OBSERVACION_MS = 50;
+
     private final Arena arena;
     private final RegistroCombate registro;
 
@@ -21,13 +23,36 @@ public class TorneoManager {
     /** @return el campeon del torneo */
     public Personaje jugarTorneo() {
         List<Personaje> gladiadores = crearGladiadores().getMiembros();
+        Personaje[] finalistas = new Personaje[2];
 
-        // TALLER CONCURRENCIA: las dos semifinales se simulan una tras otra en el hilo principal.
-        // La final solo puede empezar cuando ambas hayan terminado.
-        Personaje finalista1 = simularSemifinal(gladiadores.get(0), gladiadores.get(1));
-        Personaje finalista2 = simularSemifinal(gladiadores.get(2), gladiadores.get(3));
+        Thread semifinalA = new Thread(
+                () -> finalistas[0] = simularSemifinal(gladiadores.get(0), gladiadores.get(1)), "semifinal-A");
+        Thread semifinalB = new Thread(
+                () -> finalistas[1] = simularSemifinal(gladiadores.get(2), gladiadores.get(3)), "semifinal-B");
 
-        return simularFinal(finalista1, finalista2);
+        mostrarEstados("antes de start()", semifinalA, semifinalB);
+        semifinalA.start();
+        semifinalB.start();
+        try {
+            Thread.sleep(OBSERVACION_MS);
+            mostrarEstados("durante la ejecucion", semifinalA, semifinalB);
+            semifinalA.join();
+            semifinalB.join();
+        } catch (InterruptedException e) {
+            semifinalA.interrupt();
+            semifinalB.interrupt();
+            Thread.currentThread().interrupt();
+            registro.agregar("El torneo se interrumpio antes de la final.");
+            return null;
+        }
+        mostrarEstados("despues de join()", semifinalA, semifinalB);
+
+        return simularFinal(finalistas[0], finalistas[1]);
+    }
+
+    private void mostrarEstados(String momento, Thread semifinalA, Thread semifinalB) {
+        registro.agregar("[Hilos %s] %s: %s | %s: %s", momento, semifinalA.getName(), semifinalA.getState(),
+                semifinalB.getName(), semifinalB.getState());
     }
 
     public Personaje simularSemifinal(Personaje a, Personaje b) {
