@@ -1,26 +1,32 @@
 package com.rpg.entities;
 
+import com.rpg.concurrency.EfectoContinuoTask;
 import com.rpg.entities.enums.EstadoPersonaje;
 import com.rpg.entities.enums.TipoPersonaje;
 import com.rpg.exceptions.SinManaException;
 import com.rpg.items.Inventario;
 import com.rpg.items.Pocion;
 
+import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
+import java.io.Serial;
+import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Consumer;
 
-// TALLER ARCHIVOS: para guardar la partida con ObjectOutputStream, Personaje debe volverse Serializable
-// (con serialVersionUID). Piensa que campos son transient y que clases anidadas (Inventario, Pocion, Arma,
-// Gremio, EstadoEfecto, enums) tambien deben ser Serializable, o tendras NotSerializableException.
-// Ojo: Gremio y Personaje se referencian entre si (la serializacion maneja el ciclo).
-public abstract class Personaje implements ICombatiente {
+public abstract class Personaje implements ICombatiente, Serializable {
+
+    @Serial
+    private static final long serialVersionUID = 1L;
 
     private static final int VIDA_BASE = 100;
     private static final int ATAQUE_BASE = 10;
@@ -28,6 +34,8 @@ public abstract class Personaje implements ICombatiente {
     private static final int CAPACIDAD_INVENTARIO = 3;
     private static final int DANIO_MINIMO = 1;
     private static final double PORCENTAJE_TOTAL = 100.0;
+    private static final long INTERVALO_EFECTO_MS = 2000;
+    private static final long ESPERA_FIN_EFECTO_MS = 500;
 
     private String nombre;
     private final TipoPersonaje tipo;
@@ -37,11 +45,14 @@ public abstract class Personaje implements ICombatiente {
     private final int defensaBase;
     private EstadoPersonaje estado = EstadoPersonaje.VIVO;
 
-    private Arma arma;                  // asociacion 0..1
-    private Gremio gremio;              // asociacion bidireccional 0..1
-    private final Inventario<Pocion> inventario = new Inventario<>(CAPACIDAD_INVENTARIO); // composicion
+    private Arma arma;
+    private Gremio gremio;
+    private final Inventario<Pocion> inventario = new Inventario<>(CAPACIDAD_INVENTARIO);
     private final Set<String> habilidades = new HashSet<>();
     private final Map<String, EstadoEfecto> efectos = new LinkedHashMap<>();
+
+    private transient Map<String, Thread> hilosEfectos;
+    private transient Consumer<String> notificador;
 
     protected Personaje(String nombre, TipoPersonaje tipo) {
         this(nombre, tipo, VIDA_BASE, ATAQUE_BASE, DEFENSA_BASE);
@@ -96,17 +107,15 @@ public abstract class Personaje implements ICombatiente {
 
     // ---- vida
 
-    public void recibirDanio(int cantidad) {
+    public synchronized void recibirDanio(int cantidad) {
         if (cantidad < 0) {
             throw new IllegalArgumentException("El danio no puede ser negativo");
         }
-        // TALLER CONCURRENCIA: lee, calcula y escribe la vida en pasos separados sin proteccion.
-        // Con varios hilos sobre el mismo Personaje (aqui y en curar), el resultado no es seguro.
         setVida(vida - cantidad);
     }
 
     /** @return vida realmente recuperada */
-    public int curar(int cantidad) {
+    public synchronized int curar(int cantidad) {
         if (cantidad < 0) {
             throw new IllegalArgumentException("La curacion no puede ser negativa");
         }
@@ -119,73 +128,134 @@ public abstract class Personaje implements ICombatiente {
     }
 
     public void restaurarVida() {
-        efectos.clear();
-        estado = EstadoPersonaje.VIVO;
-        vida = vidaMaxima;
+        detenerEfectos();
+        synchronized (this) {
+            estado = EstadoPersonaje.VIVO;
+            vida = vidaMaxima;
+        }
     }
 
     @Override
-    public boolean estaVivo() {
+    public synchronized boolean estaVivo() {
         return estado != EstadoPersonaje.MUERTO;
     }
 
-    // ---- efectos DoT / HoT (hoy se procesan por turno, de forma secuencial)
+    // ---- efectos DoT / HoT
 
     public void aplicarEfecto(EstadoEfecto efecto) {
-        efectos.put(efecto.getNombre(), efecto.copia());
-        if (efecto.esDanio() && estado == EstadoPersonaje.VIVO) {
-            estado = EstadoPersonaje.ENVENENADO;
+        EstadoEfecto copia = efecto.copia();
+        Thread hilo = new Thread(new EfectoContinuoTask(this, copia, INTERVALO_EFECTO_MS),
+                "efecto-" + nombre + "-" + copia.getNombre());
+        hilo.setDaemon(true);
+        Thread anterior;
+        synchronized (this) {
+            if (!estaVivo()) {
+                return;
+            }
+            efectos.put(copia.getNombre(), copia);
+            anterior = hilos().put(copia.getNombre(), hilo);
+            if (copia.esDanio() && estado == EstadoPersonaje.VIVO) {
+                estado = EstadoPersonaje.ENVENENADO;
+            }
         }
+        if (anterior != null) {
+            anterior.interrupt();
+        }
+        hilo.start();
     }
 
     public boolean quitarEfecto(String nombreEfecto) {
-        if (efectos.remove(nombreEfecto) == null) {
-            return false;
+        Thread hilo;
+        synchronized (this) {
+            if (efectos.remove(nombreEfecto) == null) {
+                return false;
+            }
+            hilo = hilos().remove(nombreEfecto);
+            normalizarEstado();
         }
-        normalizarEstado();
+        if (hilo != null) {
+            hilo.interrupt();
+        }
         return true;
     }
 
     public void quitarEfectosDanio() {
-        for (String nombreEfecto : new ArrayList<>(efectos.keySet())) {
-            if (efectos.get(nombreEfecto).esDanio()) {
-                quitarEfecto(nombreEfecto);
+        List<String> nombresDanio = new ArrayList<>();
+        synchronized (this) {
+            for (EstadoEfecto efecto : efectos.values()) {
+                if (efecto.esDanio()) {
+                    nombresDanio.add(efecto.getNombre());
+                }
             }
+        }
+        for (String nombreEfecto : nombresDanio) {
+            quitarEfecto(nombreEfecto);
         }
     }
 
-    /**
-     * Aplica un tick de cada efecto activo.
-     * @return mensajes para el registro de combate
-     */
-    public List<String> procesarEfectos() {
-        // TALLER CONCURRENCIA: cada efecto se procesa aqui, turno a turno. Piensa que pasaria
-        // si cada uno corriera por su cuenta y hubiera que cancelarlo a mitad de camino.
-        List<String> mensajes = new ArrayList<>();
-        Iterator<EstadoEfecto> iterador = efectos.values().iterator();
-        while (iterador.hasNext()) {
-            EstadoEfecto efecto = iterador.next();
-            mensajes.add(aplicarTick(efecto));
-            efecto.consumirTurno();
-            if (efecto.haTerminado()) {
-                iterador.remove();
-                mensajes.add(nombre + ": termina " + efecto.getNombre());
-            }
-            if (!estaVivo()) {
-                break;
-            }
+    public void detenerEfectos() {
+        List<Thread> activos;
+        synchronized (this) {
+            activos = new ArrayList<>(hilos().values());
+            hilos().clear();
+            efectos.clear();
+            normalizarEstado();
         }
-        normalizarEstado();
-        return mensajes;
+        for (Thread hilo : activos) {
+            hilo.interrupt();
+        }
+        try {
+            for (Thread hilo : activos) {
+                hilo.join(ESPERA_FIN_EFECTO_MS);
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
-    private String aplicarTick(EstadoEfecto efecto) {
+    /** @return mensaje del tick, o null si el efecto ya no esta activo */
+    public synchronized String aplicarTickEfecto(EstadoEfecto efecto) {
+        if (efectos.get(efecto.getNombre()) != efecto || !estaVivo()) {
+            return null;
+        }
+        String mensaje;
         if (efecto.esDanio()) {
             recibirDanio(efecto.getValorPorTick());
-            return String.format("%s sufre %d de dano por %s", nombre, efecto.getValorPorTick(), efecto.getNombre());
+            mensaje = String.format("%s sufre %d de dano por %s", nombre, efecto.getValorPorTick(), efecto.getNombre());
+        } else {
+            int curado = curar(efecto.getValorPorTick());
+            mensaje = String.format("%s recupera %d de vida por %s", nombre, curado, efecto.getNombre());
         }
-        int curado = curar(efecto.getValorPorTick());
-        return String.format("%s recupera %d de vida por %s", nombre, curado, efecto.getNombre());
+        efecto.consumirTurno();
+        return mensaje;
+    }
+
+    public synchronized void finalizarEfecto(EstadoEfecto efecto) {
+        efectos.remove(efecto.getNombre(), efecto);
+        hilos().remove(efecto.getNombre(), Thread.currentThread());
+        normalizarEstado();
+    }
+
+    public void setNotificador(Consumer<String> notificador) {
+        this.notificador = notificador;
+    }
+
+    public boolean tieneNotificador() {
+        return notificador != null;
+    }
+
+    public void notificar(String mensaje) {
+        Consumer<String> destino = notificador;
+        if (destino != null && mensaje != null) {
+            destino.accept(mensaje);
+        }
+    }
+
+    private Map<String, Thread> hilos() {
+        if (hilosEfectos == null) {
+            hilosEfectos = new HashMap<>();
+        }
+        return hilosEfectos;
     }
 
     private boolean tieneEfectoDanio() {
@@ -206,14 +276,14 @@ public abstract class Personaje implements ICombatiente {
 
     // ---- aturdimiento
 
-    public void aturdir() {
+    public synchronized void aturdir() {
         if (estaVivo()) {
             estado = EstadoPersonaje.ATURDIDO;
         }
     }
 
     /** @return true si estaba aturdido (y por tanto pierde este turno) */
-    public boolean consumirAturdimiento() {
+    public synchronized boolean consumirAturdimiento() {
         boolean estabaAturdido = estado == EstadoPersonaje.ATURDIDO;
         if (estabaAturdido) {
             estado = tieneEfectoDanio() ? EstadoPersonaje.ENVENENADO : EstadoPersonaje.VIVO;
@@ -269,7 +339,7 @@ public abstract class Personaje implements ICombatiente {
 
     // ---- getters y setters validados
 
-    public void setVida(int nuevaVida) {
+    public synchronized void setVida(int nuevaVida) {
         vida = Math.max(0, Math.min(nuevaVida, vidaMaxima));
         if (vida == 0) {
             estado = EstadoPersonaje.MUERTO;
@@ -281,7 +351,7 @@ public abstract class Personaje implements ICombatiente {
         this.nombre = nombre;
     }
 
-    public void setVidaMaxima(int vidaMaxima) {
+    public synchronized void setVidaMaxima(int vidaMaxima) {
         if (vidaMaxima <= 0) {
             throw new IllegalArgumentException("La vida maxima debe ser positiva");
         }
@@ -301,15 +371,15 @@ public abstract class Personaje implements ICombatiente {
         return tipo;
     }
 
-    public int getVida() {
+    public synchronized int getVida() {
         return vida;
     }
 
-    public int getVidaMaxima() {
+    public synchronized int getVidaMaxima() {
         return vidaMaxima;
     }
 
-    public EstadoPersonaje getEstado() {
+    public synchronized EstadoPersonaje getEstado() {
         return estado;
     }
 
@@ -329,7 +399,21 @@ public abstract class Personaje implements ICombatiente {
         return Collections.unmodifiableSet(habilidades);
     }
 
-    public Collection<EstadoEfecto> getEfectos() {
-        return Collections.unmodifiableCollection(efectos.values());
+    public synchronized Collection<EstadoEfecto> getEfectos() {
+        return List.copyOf(efectos.values());
+    }
+
+    @Serial
+    private synchronized void writeObject(ObjectOutputStream salida) throws IOException {
+        salida.defaultWriteObject();
+    }
+
+    @Serial
+    private void readObject(ObjectInputStream entrada) throws IOException, ClassNotFoundException {
+        entrada.defaultReadObject();
+        efectos.clear();
+        if (estado == EstadoPersonaje.ENVENENADO) {
+            estado = EstadoPersonaje.VIVO;
+        }
     }
 }

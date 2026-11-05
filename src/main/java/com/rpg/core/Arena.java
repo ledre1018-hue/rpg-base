@@ -9,11 +9,14 @@ import java.util.Random;
 /** Reglas de un combate: ataques, habilidades, efectos al inicio del turno y duelos automaticos. */
 public class Arena {
 
+    private static final int PORCENTAJE_TOTAL = 100;
     private static final int PROBABILIDAD_CRITICO = 15;
     private static final double FACTOR_CRITICO = 1.5;
+    private static final double FACTOR_NORMAL = 1.0;
     private static final int VARIACION_DANIO = 3;
     private static final int PROBABILIDAD_ESPECIAL_IA = 35;
     private static final int MAXIMO_RONDAS = 40;
+    private static final long PAUSA_TURNO_MS = 150;
 
     private final RegistroCombate registro;
     private final Random azar;
@@ -23,12 +26,13 @@ public class Arena {
         this.azar = azar;
     }
 
-    /** Procesa efectos y aturdimiento. @return true si el personaje puede actuar este turno */
+    public void prepararCombatiente(Personaje personaje) {
+        personaje.setNotificador(registro::agregar);
+    }
+
+    /** Revisa vida y aturdimiento. @return true si el personaje puede actuar este turno */
     public boolean iniciarTurno(Personaje personaje) {
         personaje.alIniciarTurno();
-        for (String mensaje : personaje.procesarEfectos()) {
-            registro.agregar(mensaje);
-        }
         if (!personaje.estaVivo()) {
             registro.agregar("%s cae derrotado por sus efectos", personaje.getNombre());
             return false;
@@ -41,8 +45,8 @@ public class Arena {
     }
 
     public void atacar(Personaje atacante, Personaje defensor) {
-        boolean critico = azar.nextInt(100) < PROBABILIDAD_CRITICO;
-        double factor = critico ? FACTOR_CRITICO : 1.0;
+        boolean critico = azar.nextInt(PORCENTAJE_TOTAL) < PROBABILIDAD_CRITICO;
+        double factor = critico ? FACTOR_CRITICO : FACTOR_NORMAL;
         int danioBruto = (int) Math.round(atacante.calcularDanio() * factor) + azar.nextInt(VARIACION_DANIO + 1);
         int vidaAntes = defensor.getVida();
         defensor.defender(danioBruto);
@@ -68,7 +72,7 @@ public class Arena {
         if (!atacante.estaVivo() || !defensor.estaVivo() || !iniciarTurno(atacante)) {
             return;
         }
-        boolean quiereEspecial = azar.nextInt(100) < PROBABILIDAD_ESPECIAL_IA;
+        boolean quiereEspecial = azar.nextInt(PORCENTAJE_TOTAL) < PROBABILIDAD_ESPECIAL_IA;
         if (quiereEspecial && intentarEspecial(atacante, defensor)) {
             return;
         }
@@ -77,11 +81,26 @@ public class Arena {
 
     /** Pelea hasta que uno cae (o se acaban las rondas). @return el ganador */
     public Personaje duelo(Personaje a, Personaje b) {
-        for (int ronda = 1; ronda <= MAXIMO_RONDAS && a.estaVivo() && b.estaVivo(); ronda++) {
+        prepararCombatiente(a);
+        prepararCombatiente(b);
+        for (int ronda = 1; ronda <= MAXIMO_RONDAS && a.estaVivo() && b.estaVivo()
+                && !Thread.currentThread().isInterrupted(); ronda++) {
             registro.agregar("-- Ronda %d --", ronda);
             turnoAutomatico(a, b);
+            pausa();
             turnoAutomatico(b, a);
+            pausa();
         }
+        a.detenerEfectos();
+        b.detenerEfectos();
         return a.getVida() >= b.getVida() ? a : b;
+    }
+
+    private void pausa() {
+        try {
+            Thread.sleep(PAUSA_TURNO_MS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 }
