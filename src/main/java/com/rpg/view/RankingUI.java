@@ -69,8 +69,7 @@ public class RankingUI {
         if (victorias.isEmpty()) {
             System.out.println("Ese jugador no tiene victorias registradas.");
         }
-        for (Victoria victoria : victorias) {
-            System.out.printf("%-15s %s%n", victoria.getMonstruo(), victoria.getFecha().format(FORMATO_FECHA));
-        }
+        victorias.forEach(victoria ->
+                System.out.printf("%-15s %s%n", victoria.getMonstruo(), victoria.getFecha().format(FORMATO_FECHA)));
     }
 }

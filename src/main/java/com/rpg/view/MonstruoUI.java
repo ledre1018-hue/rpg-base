@@ -110,8 +110,6 @@ public class MonstruoUI {
         if (monstruos.isEmpty()) {
             System.out.println("No hay monstruos que mostrar.");
         }
-        for (Monstruo monstruo : monstruos) {
-            System.out.println(monstruo);
-        }
+        monstruos.forEach(System.out::println);
     }
 }
