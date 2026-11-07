@@ -5,6 +5,8 @@ import com.rpg.dao.VictoriaDAO;
 import com.rpg.model.Monstruo;
 
 import java.util.List;
+import java.util.Objects;
+import java.util.function.Predicate;
 
 public class MonstruoController {
 
@@ -13,8 +15,19 @@ public class MonstruoController {
     private static final int VALOR_MINIMO = 1;
     private static final int SIN_VICTORIAS = 0;
     private static final String SIN_ERRORES = null;
+    private static final Predicate<String> NOMBRE_VACIO = String::isBlank;
+    private static final Predicate<String> NOMBRE_LARGO = nombre -> nombre.length() > LARGO_MAXIMO_NOMBRE;
+    private static final Predicate<Integer> NO_POSITIVO = valor -> valor < VALOR_MINIMO;
 
     private final MonstruoDAO monstruoDAO = new MonstruoDAO();
+    private final List<ReglaMonstruo> reglas = List.of(
+            candidato -> NOMBRE_VACIO.test(candidato.getNombre())
+                    ? "El nombre no puede estar vacio." : SIN_ERRORES,
+            candidato -> NOMBRE_LARGO.test(candidato.getNombre())
+                    ? "El nombre admite maximo " + LARGO_MAXIMO_NOMBRE + " caracteres." : SIN_ERRORES,
+            candidato -> NO_POSITIVO.test(candidato.getVida()) || NO_POSITIVO.test(candidato.getAtaque())
+                    ? "La vida y el ataque deben ser mayores que 0." : SIN_ERRORES,
+            this::nombreRepetido);
     private final VictoriaDAO victoriaDAO = new VictoriaDAO();
     private final Sesion sesion;
 
@@ -46,12 +59,13 @@ public class MonstruoController {
         if (!puedeAdministrar()) {
             return MENSAJE_SOLO_ADMIN;
         }
-        String error = validar(nombre, vida, ataque, Monstruo.SIN_ID);
+        Monstruo nuevo = new Monstruo(nombre.trim(), vida, ataque);
+        String error = validar(nuevo);
         if (error != null) {
             return error;
         }
-        monstruoDAO.crear(new Monstruo(nombre.trim(), vida, ataque));
-        return "Monstruo " + nombre.trim() + " creado.";
+        monstruoDAO.crear(nuevo);
+        return "Monstruo " + nuevo.getNombre() + " creado.";
     }
 
     public String editar(int id, String nombre, int vida, int ataque) {
@@ -61,11 +75,12 @@ public class MonstruoController {
         if (!existe(id)) {
             return noExiste(id);
         }
-        String error = validar(nombre, vida, ataque, id);
+        Monstruo editado = new Monstruo(id, nombre.trim(), vida, ataque);
+        String error = validar(editado);
         if (error != null) {
             return error;
         }
-        monstruoDAO.actualizar(new Monstruo(id, nombre.trim(), vida, ataque));
+        monstruoDAO.actualizar(editado);
         return "Monstruo #" + id + " actualizado.";
     }
 
@@ -85,18 +100,18 @@ public class MonstruoController {
         return "Monstruo " + monstruo.getNombre() + " eliminado.";
     }
 
-    private String validar(String nombre, int vida, int ataque, int idActual) {
-        if (nombre.isBlank()) {
-            return "El nombre no puede estar vacio.";
-        }
-        if (nombre.trim().length() > LARGO_MAXIMO_NOMBRE) {
-            return "El nombre admite maximo " + LARGO_MAXIMO_NOMBRE + " caracteres.";
-        }
-        if (vida < VALOR_MINIMO || ataque < VALOR_MINIMO) {
-            return "La vida y el ataque deben ser mayores que 0.";
-        }
-        Monstruo existente = monstruoDAO.buscarPorNombre(nombre.trim());
-        if (existente != null && existente.getId() != idActual) {
+    /** Aplica las reglas en orden y devuelve el primer error, o null si todas se cumplen. */
+    private String validar(Monstruo candidato) {
+        return reglas.stream()
+                .map(regla -> regla.validar(candidato))
+                .filter(Objects::nonNull)
+                .findFirst()
+                .orElse(SIN_ERRORES);
+    }
+
+    private String nombreRepetido(Monstruo candidato) {
+        Monstruo existente = monstruoDAO.buscarPorNombre(candidato.getNombre());
+        if (existente != null && existente.getId() != candidato.getId()) {
             return "Ya existe un monstruo llamado " + existente.getNombre() + ".";
         }
         return SIN_ERRORES;
