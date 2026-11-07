@@ -180,17 +180,14 @@ public abstract class Personaje implements ICombatiente, Serializable {
     }
 
     public void quitarEfectosDanio() {
-        List<String> nombresDanio = new ArrayList<>();
+        List<String> nombresDanio;
         synchronized (this) {
-            for (EstadoEfecto efecto : efectos.values()) {
-                if (efecto.esDanio()) {
-                    nombresDanio.add(efecto.getNombre());
-                }
-            }
+            nombresDanio = efectos.values().stream()
+                    .filter(EstadoEfecto::esDanio)
+                    .map(EstadoEfecto::getNombre)
+                    .toList();
         }
-        for (String nombreEfecto : nombresDanio) {
-            quitarEfecto(nombreEfecto);
-        }
+        nombresDanio.forEach(this::quitarEfecto);
     }
 
     public void detenerEfectos() {
@@ -259,12 +256,7 @@ public abstract class Personaje implements ICombatiente, Serializable {
     }
 
     private boolean tieneEfectoDanio() {
-        for (EstadoEfecto efecto : efectos.values()) {
-            if (efecto.esDanio()) {
-                return true;
-            }
-        }
-        return false;
+        return efectos.values().stream().anyMatch(EstadoEfecto::esDanio);
     }
 
     /** Si ya no queda ningun DoT, un personaje ENVENENADO vuelve a estar VIVO. */
