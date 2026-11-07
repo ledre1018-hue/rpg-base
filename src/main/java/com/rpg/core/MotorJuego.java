@@ -24,6 +24,7 @@ import java.io.File;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Random;
+import java.util.function.Consumer;
 
 /** Coordina el flujo del juego: crear heroe, combatir, torneo, bestiario y guardado. */
 public class MotorJuego {
@@ -57,12 +58,17 @@ public class MotorJuego {
     private volatile Gremio gremio = new Gremio(NOMBRE_GREMIO);
     private volatile String ultimoGuardado = "";
     private volatile boolean partidaActiva;
+    private Consumer<String> alVencerMonstruo = nombre -> { };
 
     public MotorJuego(Consola consola) {
         this.consola = consola;
     }
 
     // ---- opciones del menu principal
+
+    public void setAlVencerMonstruo(Consumer<String> alVencerMonstruo) {
+        this.alVencerMonstruo = alVencerMonstruo;
+    }
 
     public void iniciarAutoGuardado() {
         AutoGuardadoDaemon.iniciar(this::autoGuardar, INTERVALO_AUTOGUARDADO_MS);
@@ -356,6 +362,7 @@ public class MotorJuego {
             registro.agregar("%nVictoria de %s!", jugador.getNombre());
             perfil.registrarVictoria();
             bestiario.registrarEnemigoDerrotado(enemigo.getNombre());
+            alVencerMonstruo.accept(enemigo.getNombre());
             desbloquearLogros(jugador, enemigo);
             repartirBotin(jugador);
         } else {
