@@ -24,5 +24,5 @@ CREATE TABLE IF NOT EXISTS victorias (
     CONSTRAINT fk_victoria_monstruo FOREIGN KEY (monstruo_id) REFERENCES monstruos(id) ON DELETE RESTRICT
 );
 
-INSERT IGNORE INTO jugadores (usuario, clave, rol) VALUES ('admin', 'admin123', 'admin'), ('jugador1', '1234', 'jugador');
+INSERT IGNORE INTO jugadores (usuario, clave, rol) VALUES ('admin', SHA2('admin123', 256), 'admin'), ('jugador1', SHA2('1234', 256), 'jugador');
 INSERT IGNORE INTO monstruos (nombre, vida, ataque) VALUES ('Goblin', 50, 8), ('Arana Gigante', 60, 10), ('Ogro', 100, 14), ('Dragon Joven', 160, 20);

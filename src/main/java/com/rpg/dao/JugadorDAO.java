@@ -20,7 +20,7 @@ public class JugadorDAO {
         try (Connection conexion = ConexionDB.obtenerConexion();
              PreparedStatement sentencia = conexion.prepareStatement(SQL_REGISTRAR)) {
             sentencia.setString(Parametro.PRIMERO, usuario);
-            sentencia.setString(Parametro.SEGUNDO, clave);
+            sentencia.setString(Parametro.SEGUNDO, HashClave.sha256(clave));
             sentencia.setString(Parametro.TERCERO, rol);
             return sentencia.executeUpdate() > 0;
         } catch (SQLException e) {
@@ -32,7 +32,7 @@ public class JugadorDAO {
         try (Connection conexion = ConexionDB.obtenerConexion();
              PreparedStatement sentencia = conexion.prepareStatement(SQL_AUTENTICAR)) {
             sentencia.setString(Parametro.PRIMERO, usuario);
-            sentencia.setString(Parametro.SEGUNDO, clave);
+            sentencia.setString(Parametro.SEGUNDO, HashClave.sha256(clave));
             try (ResultSet filas = sentencia.executeQuery()) {
                 return filas.next() ? mapear(filas) : null;
             }
