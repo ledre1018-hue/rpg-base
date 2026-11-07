@@ -6,6 +6,7 @@ import com.rpg.entities.Mago;
 import com.rpg.entities.Personaje;
 
 import java.util.List;
+import java.util.function.Supplier;
 
 /** Torneo de 4 gladiadores: dos semifinales y una final. */
 public class TorneoManager {
@@ -71,10 +72,14 @@ public class TorneoManager {
 
     private Escuadron crearGladiadores() {
         Escuadron escuadron = new Escuadron("Gladiadores");
-        escuadron.agregar(new Guerrero("Maximo"));
-        escuadron.agregar(new Mago("Circe"));
-        escuadron.agregar(new Guerrero("Aquiles"));
-        escuadron.agregar(new Mago("Merlina"));
+        List<Supplier<Personaje>> fabricasDeGladiadores = List.of(
+                () -> new Guerrero("Maximo"),
+                () -> new Mago("Circe"),
+                () -> new Guerrero("Aquiles"),
+                () -> new Mago("Merlina"));
+        fabricasDeGladiadores.stream()
+                .map(Supplier::get)
+                .forEach(escuadron::agregar);
         return escuadron;
     }
 }

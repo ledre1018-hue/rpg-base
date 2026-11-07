@@ -25,6 +25,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Random;
 import java.util.function.Consumer;
+import java.util.function.Function;
 
 /** Coordina el flujo del juego: crear heroe, combatir, torneo, bestiario y guardado. */
 public class MotorJuego {
@@ -109,9 +110,7 @@ public class MotorJuego {
             return;
         }
         System.out.println("\n=== HISTORIAL DE COMBATES (" + logCombate.getArchivo().getPath() + ") ===");
-        for (String linea : lineas) {
-            System.out.println(linea);
-        }
+        lineas.forEach(System.out::println);
     }
 
     public void mostrarArchivos() {
@@ -121,9 +120,8 @@ public class MotorJuego {
         System.out.println("\n=== ARCHIVOS DE PARTIDA ===");
         File carpeta = GestorArchivos.CARPETA;
         System.out.println("Carpeta: " + carpeta.getPath() + " -> " + carpeta.getAbsolutePath());
-        for (File archivo : List.of(GestorArchivos.PARTIDA, GestorArchivos.RESUMEN, GestorArchivos.LOG)) {
-            System.out.println(GestorArchivos.describir(archivo));
-        }
+        List.of(GestorArchivos.PARTIDA, GestorArchivos.RESUMEN, GestorArchivos.LOG)
+                .forEach(archivo -> System.out.println(GestorArchivos.describir(archivo)));
     }
 
     public void borrarPartida() {
@@ -438,9 +436,10 @@ public class MotorJuego {
         List<Personaje> miembros = gremio.getMiembros();
         contenido.append("Gremio ").append(gremio.getNombre()).append(": ")
                 .append(miembros.size()).append(" miembros").append(salto);
-        for (Personaje miembro : miembros) {
-            contenido.append("  ").append(FormatoCombate.resumen(miembro)).append(salto);
-        }
+        Function<Personaje, String> lineaDeMiembro = miembro -> "  " + FormatoCombate.resumen(miembro) + salto;
+        miembros.stream()
+                .map(lineaDeMiembro)
+                .forEach(contenido::append);
     }
 
     private boolean guardarEnDisco() {
