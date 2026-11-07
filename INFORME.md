@@ -45,3 +45,9 @@ Acceso denegado
 ```
 
 Con Statement la comilla cierra el texto, `OR 1=1` vuelve verdadera la condicion y `-- ` comenta la clave. Con PreparedStatement (el Escudo) la estructura del SQL queda fija antes de recibir los datos: cada `?` es solo un valor, nunca codigo, asi que `admin' OR 1=1 -- ` se busca como un nombre de usuario literal y el login falla.
+
+## 6. Reto extra: clave con hash SHA-256
+
+Las claves ya no se guardan en texto plano: `JugadorDAO` calcula SHA-256 con `MessageDigest` (clase `HashClave`) y guarda los 64 caracteres hexadecimales. Al autenticar se hashea la clave escrita y se compara con `WHERE usuario = ? AND clave = ?`, asi que si se filtra la base no aparecen las claves reales.
+
+PreparedStatement sigue siendo necesario: el hash protege la clave guardada, pero no impide que `admin' OR 1=1 -- ` inyecte SQL por el campo usuario. `LoginInseguroDemo` sigue entrando aunque las claves esten hasheadas.
